@@ -18,6 +18,8 @@ import io.swagger.v3.oas.models.responses.ApiResponse;
 import io.swagger.v3.oas.models.responses.ApiResponses;
 import org.apache.maven.plugin.logging.Log;
 
+import java.net.URI;
+import java.util.List;
 import java.util.Map;
 
 public class FromOpenApiConverter {
@@ -76,6 +78,9 @@ public class FromOpenApiConverter {
             info.put("version", "1.0.0");
         }
         swagger2.set("info", info);
+
+        // Servers -> host, basePath, schemes
+        convertServersToHostAndBasePath(openAPI, swagger2);
 
         // Paths
         if (openAPI.getPaths() != null && !openAPI.getPaths().isEmpty()) {
@@ -481,6 +486,61 @@ public class FromOpenApiConverter {
         }
 
         return swagger2Schema;
+    }
+
+    private void convertServersToHostAndBasePath(OpenAPI openAPI, ObjectNode swagger2) {
+        if (openAPI.getServers() == null || openAPI.getServers().isEmpty()) {
+            return;
+        }
+
+        // Use the first server as the primary server for Swagger 2
+        io.swagger.v3.oas.models.servers.Server firstServer = openAPI.getServers().get(0);
+        String serverUrl = firstServer.getUrl();
+
+        if (serverUrl == null || serverUrl.trim().isEmpty()) {
+            return;
+        }
+
+        try {
+            // Handle relative URLs (those starting with /)
+            if (serverUrl.startsWith("/")) {
+                swagger2.put("basePath", serverUrl);
+                return;
+            }
+
+            // Parse the full URL
+            URI uri = new URI(serverUrl);
+
+            // Set scheme
+            String scheme = uri.getScheme();
+            if (scheme != null) {
+                ArrayNode schemes = jsonMapper.createArrayNode();
+                schemes.add(scheme);
+                swagger2.set("schemes", schemes);
+            }
+
+            // Set host
+            String host = uri.getHost();
+            if (host != null) {
+                // Include port if it's not default
+                int port = uri.getPort();
+                if (port != -1 &&
+                    !((port == 80 && "http".equals(scheme)) ||
+                      (port == 443 && "https".equals(scheme)))) {
+                    host = host + ":" + port;
+                }
+                swagger2.put("host", host);
+            }
+
+            // Set basePath
+            String path = uri.getPath();
+            if (path != null && !path.isEmpty() && !"/".equals(path)) {
+                swagger2.put("basePath", path);
+            }
+
+        } catch (Exception e) {
+            log.warn("Failed to parse server URL: " + serverUrl + " - " + e.getMessage());
+        }
     }
 
     // Risoluzione riferimenti
